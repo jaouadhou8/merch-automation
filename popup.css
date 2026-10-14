@@ -21,9 +21,10 @@
 }
 
 body {
-  width: 420px;
+  width: min(100%, 640px);
+  margin: 0 auto;
   min-height: 520px;
-  max-height: 600px;
+  min-height: 100vh;
   overflow-y: auto;
   background: var(--bg);
   color: var(--text);
@@ -598,3 +599,10 @@ body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 }
 
 .footer a:hover { text-decoration: underline; }
+
+.input-error { color: var(--red); padding: 12px 20px; white-space: pre-wrap; }
+.queue-item a { color: var(--blue); margin-left: 8px; }
+.status-prepared { color: var(--green); }
+.status-submitted { color: var(--yellow); }
+.status-stopped { color: var(--yellow); }
+.config-section .toggle-wrap { margin-top: 12px; }

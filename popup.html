@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Merch Bulk Uploader</title>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -19,7 +18,7 @@
         </svg>
         <div>
           <h1>Merch Uploader</h1>
-          <span class="version">v1.0</span>
+          <span class="version">v1.1</span>
         </div>
       </div>
     </header>
@@ -105,7 +104,7 @@
           <path d="M2 28L12 20L22 28L30 22L38 28" stroke="#FF6B2C" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         <p class="upload-title">Select design images</p>
-        <p class="upload-sub">PNG files from your design folder</p>
+        <p class="upload-sub">PNG or JPEG files; filenames must match the CSV exactly</p>
         <input type="file" id="designInput" accept="image/png,image/jpeg" multiple webkitdirectory hidden>
       </div>
 
@@ -125,6 +124,7 @@
             <path d="M4 11L7 8L9 10L12 6" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
           <span id="designCount">0 images loaded</span>
+          <button id="designReplace" class="btn-secondary btn-sm">Replace images</button>
         </div>
         <div id="designPreview" class="design-preview"></div>
         <div id="matchStatus" class="match-status"></div>
@@ -133,7 +133,7 @@
       <div class="btn-row">
         <button id="backToStep1" class="btn-secondary">Back</button>
         <button id="toStep3" class="btn-primary" disabled>
-          Review & Upload
+          Review Listings
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path d="M6 3L11 8L6 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
@@ -148,28 +148,20 @@
         <div class="config-row">
           <label>Concurrent tabs</label>
           <div class="stepper">
-            <button id="tabsMinus" class="btn-stepper">−</button>
-            <span id="tabsCount">5</span>
-            <button id="tabsPlus" class="btn-stepper">+</button>
+            <button id="tabsMinus" class="btn-stepper" aria-label="Fewer concurrent tabs">−</button>
+            <span id="tabsCount">1</span>
+            <button id="tabsPlus" class="btn-stepper" aria-label="More concurrent tabs">+</button>
           </div>
         </div>
         <div class="config-row">
-          <label>Delay between actions (ms)</label>
+          <label for="actionDelay">Delay between actions (ms)</label>
           <input type="number" id="actionDelay" value="1500" min="500" max="10000" step="100" class="input-num">
         </div>
-        <div class="config-row">
-          <label>Product type</label>
-          <select id="productType" class="input-select">
-            <option value="standard_tshirt">Standard T-Shirt</option>
-            <option value="premium_tshirt">Premium T-Shirt</option>
-            <option value="vneck">V-Neck</option>
-            <option value="tank_top">Tank Top</option>
-            <option value="long_sleeve">Long Sleeve</option>
-            <option value="sweatshirt">Sweatshirt</option>
-            <option value="hoodie">Pullover Hoodie</option>
-            <option value="popsocket">PopSocket</option>
-          </select>
-        </div>
+        <p class="note">Select products, colors, prices and marketplaces on each Amazon tab before publishing. This tool fills listing text and the design only.</p>
+        <label class="toggle-wrap">
+          <input type="checkbox" id="autoPublish">
+          <span class="toggle-label">Automatically click Publish (submission remains unverified)</span>
+        </label>
       </div>
 
       <div id="queueList" class="queue-list">
@@ -184,7 +176,7 @@
           <span id="progressText">0 / 0</span>
           <span id="progressPercent">0%</span>
         </div>
-        <div id="logArea" class="log-area"></div>
+        <div id="logArea" class="log-area" role="log" aria-live="polite"></div>
       </div>
 
       <div class="btn-row">
@@ -193,21 +185,24 @@
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
             <path d="M4 2L16 9L4 16V2Z" fill="currentColor"/>
           </svg>
-          Start Upload
+          Prepare Listings
         </button>
       </div>
 
       <button id="stopUpload" class="btn-danger" style="display:none;">
-        Stop Upload
+        Stop
       </button>
     </section>
 
+    <p id="inputError" class="input-error" role="alert" aria-live="polite"></p>
     <!-- Footer -->
     <footer class="footer">
-      <p>Make sure you're logged into <a href="https://merch.amazon.com" target="_blank">merch.amazon.com</a></p>
+      <p>Keep this uploader tab open until the queue finishes. Prepared and failed Amazon tabs stay open for inspection.</p>
+      <p>Make sure you're logged into <a href="https://merch.amazon.com" target="_blank" rel="noopener noreferrer">merch.amazon.com</a></p>
     </footer>
   </div>
 
+  <script src="core.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

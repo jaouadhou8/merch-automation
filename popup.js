@@ -1,518 +1,285 @@
-// ── State ─────────────────────────────
+'use strict';
 let csvData = [];
-let designFiles = {};  // filename -> File
-let concurrentTabs = 5;
+let designFiles = Object.create(null);
+let concurrentTabs = 1;
 let isUploading = false;
-
-// ── DOM References ───────────────────
-const $ = (s) => document.querySelector(s);
-const $$ = (s) => document.querySelectorAll(s);
-
-// ── CSV Parsing ──────────────────────
-function parseCSV(text) {
-  const lines = text.split(/\r?\n/).filter(l => l.trim());
-  if (lines.length < 2) return [];
-
-  const headers = parseCSVLine(lines[0]);
-  const rows = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseCSVLine(lines[i]);
-    if (values.length < 5) continue;
-
-    const row = {};
-    headers.forEach((h, idx) => {
-      row[h.trim().toLowerCase().replace(/\s+/g, '_')] = (values[idx] || '').trim();
-    });
-    rows.push(row);
-  }
-  return rows;
-}
-
-function parseCSVLine(line) {
-  const result = [];
-  let current = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (ch === ',' && !inQuotes) {
-      result.push(current);
-      current = '';
-    } else {
-      current += ch;
-    }
-  }
-  result.push(current);
-  return result;
-}
-
-// ── Step Navigation ──────────────────
+let runnerActive = false;
+let statuses = [];
+let inputRevision = 0;
+let designRevision = 0;
+let previewURLs = [];
+const activeTabs = new Map();
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+const parseCSV = text => MerchCore.parseCSV(text);
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+function showError(message = '') { $('#inputError').textContent = message; }
 function goToStep(num) {
-  $$('.panel').forEach(p => p.style.display = 'none');
+  $$('.panel').forEach(p => { p.style.display = 'none'; });
   $(`#step${num}`).style.display = 'block';
-
   $$('.step').forEach(s => {
-    const sNum = parseInt(s.dataset.step);
-    s.classList.remove('active', 'done');
-    if (sNum === num) s.classList.add('active');
-    else if (sNum < num) s.classList.add('done');
+    const n = Number(s.dataset.step);
+    s.classList.toggle('active', n === num);
+    s.classList.toggle('done', n < num);
   });
 }
-
-// ── CSV Upload ───────────────────────
-const csvDropZone = $('#csvDropZone');
-const csvInput = $('#csvInput');
-
-csvDropZone.addEventListener('click', () => csvInput.click());
-csvDropZone.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  csvDropZone.style.borderColor = 'var(--accent)';
-});
-csvDropZone.addEventListener('dragleave', () => {
-  csvDropZone.style.borderColor = 'var(--border)';
-});
-csvDropZone.addEventListener('drop', (e) => {
-  e.preventDefault();
-  csvDropZone.style.borderColor = 'var(--border)';
-  if (e.dataTransfer.files.length) handleCSVFile(e.dataTransfer.files[0]);
-});
-
-csvInput.addEventListener('change', (e) => {
-  if (e.target.files.length) handleCSVFile(e.target.files[0]);
-});
-
-function handleCSVFile(file) {
-  if (!file.name.endsWith('.csv')) {
-    alert('Please select a CSV file');
-    return;
-  }
-
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    csvData = parseCSV(e.target.result);
-    if (csvData.length === 0) {
-      alert('No valid rows found in CSV. Check the format.');
-      return;
-    }
-
-    // Show info
-    $('#csvFileName').textContent = file.name;
-    $('#csvRows').textContent = csvData.length;
-    $('#csvCols').textContent = Object.keys(csvData[0]).length;
-    $('#csvInfo').style.display = 'block';
-    csvDropZone.style.display = 'none';
-    $('#toStep2').disabled = false;
-  };
-  reader.readAsText(file);
+function clearPreviews() {
+  previewURLs.forEach(url => URL.revokeObjectURL(url));
+  previewURLs = [];
+  $('#designPreview').replaceChildren();
 }
-
-$('#csvRemove').addEventListener('click', () => {
+function resetQueue() {
+  statuses = csvData.map(() => 'pending');
+  $('#logArea').replaceChildren();
+  $('#progressSection').style.display = 'none';
+  $('#startUpload').disabled = false;
+  $('#startUpload').textContent = 'Prepare Listings';
+}
+function bindDrop(zone, input, handler) {
+  zone.tabIndex = 0; zone.setAttribute('role', 'button');
+  zone.addEventListener('keydown', e => {
+    if (!runnerActive && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); input().click(); }
+  });
+  zone.addEventListener('click', () => input().click());
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.style.borderColor = 'var(--accent)'; });
+  zone.addEventListener('dragleave', () => { zone.style.borderColor = ''; });
+  zone.addEventListener('drop', e => {
+    e.preventDefault(); zone.style.borderColor = '';
+    if (!runnerActive) handler(e.dataTransfer.files);
+  });
+}
+async function handleCSVFile(file) {
+  if (runnerActive) return;
+  const revision = ++inputRevision;
   csvData = [];
-  csvInput.value = '';
-  $('#csvInfo').style.display = 'none';
-  csvDropZone.style.display = '';
   $('#toStep2').disabled = true;
-});
-
-$('#toStep2').addEventListener('click', () => goToStep(2));
-
-// ── Design Files ─────────────────────
-const designDropZone = $('#designDropZone');
-const designInput = $('#designInput');
-const designFilesInput = $('#designFilesInput');
-
-designDropZone.addEventListener('click', () => {
-  if ($('#selectFolder').checked) {
-    designInput.click();
-  } else {
-    designFilesInput.click();
-  }
-});
-
-$('#selectFiles').addEventListener('click', () => {
-  $('#selectFolder').checked = false;
-  designFilesInput.click();
-});
-
-designInput.addEventListener('change', (e) => handleDesignFiles(e.target.files));
-designFilesInput.addEventListener('change', (e) => handleDesignFiles(e.target.files));
-
-designDropZone.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  designDropZone.style.borderColor = 'var(--accent)';
-});
-designDropZone.addEventListener('dragleave', () => {
-  designDropZone.style.borderColor = 'var(--border)';
-});
-designDropZone.addEventListener('drop', (e) => {
-  e.preventDefault();
-  designDropZone.style.borderColor = 'var(--border)';
-  handleDesignFiles(e.dataTransfer.files);
-});
-
-function handleDesignFiles(files) {
-  designFiles = {};
-  const imageFiles = Array.from(files).filter(f =>
-    f.type === 'image/png' || f.type === 'image/jpeg'
-  );
-
-  imageFiles.forEach(f => {
-    designFiles[f.name] = f;
-  });
-
-  // Update UI
-  $('#designCount').textContent = `${imageFiles.length} images loaded`;
-  $('#designInfo').style.display = 'block';
-  designDropZone.style.display = 'none';
-
-  // Thumbnails (max 8)
-  const preview = $('#designPreview');
-  preview.innerHTML = '';
-  imageFiles.slice(0, 8).forEach(f => {
-    const img = document.createElement('img');
-    img.className = 'design-thumb';
-    img.src = URL.createObjectURL(f);
-    preview.appendChild(img);
-  });
-  if (imageFiles.length > 8) {
-    const more = document.createElement('span');
-    more.style.cssText = 'font-size:11px;color:var(--text-dim);align-self:center;';
-    more.textContent = `+${imageFiles.length - 8} more`;
-    preview.appendChild(more);
-  }
-
-  // Check matches
-  checkDesignMatches();
+  $('#toStep3').disabled = true;
+  $('#csvInfo').style.display = 'none';
+  $('#csvDropZone').style.display = '';
+  showError();
+  try {
+    if (!/\.csv$/i.test(file.name)) throw new Error('Please select a CSV file.');
+    if (file.size > 2 * 1024 * 1024) throw new Error('CSV exceeds the 2 MiB import limit. Split it into smaller files.');
+    const rows = parseCSV(await file.text());
+    if (revision !== inputRevision) return;
+    csvData = rows;
+    $('#csvFileName').textContent = file.name;
+    $('#csvRows').textContent = rows.length;
+    $('#csvCols').textContent = Object.keys(rows[0]).length;
+    $('#csvInfo').style.display = 'block';
+    $('#csvDropZone').style.display = 'none';
+    $('#toStep2').disabled = false;
+    resetQueue();
+    checkDesignMatches();
+  } catch (error) { if (revision === inputRevision) showError(error.message); }
 }
+bindDrop($('#csvDropZone'), () => $('#csvInput'), files => { if (files[0]) handleCSVFile(files[0]); });
+$('#csvInput').addEventListener('change', e => { if (e.target.files[0]) handleCSVFile(e.target.files[0]); e.target.value = ''; });
+$('#csvRemove').addEventListener('click', () => {
+  inputRevision++;
+  csvData = [];
+  $('#csvInput').value = '';
+  $('#csvInfo').style.display = 'none';
+  $('#csvDropZone').style.display = '';
+  $('#toStep2').disabled = true;
+  resetQueue(); checkDesignMatches(); showError();
+});
+$('#toStep2').addEventListener('click', () => { checkDesignMatches(); goToStep(2); });
 
-function checkDesignMatches() {
-  const matchEl = $('#matchStatus');
-  // Try to find the design filename column
-  const designKey = findDesignKey(csvData[0]);
-
-  if (!designKey) {
-    matchEl.innerHTML = '<span class="match-warn">⚠ No "design filename" column found in CSV. Will use row order.</span>';
-    $('#toStep3').disabled = false;
-    return;
-  }
-
-  let matched = 0;
-  let missing = [];
-
-  csvData.forEach((row, i) => {
-    const fname = row[designKey];
-    if (fname && designFiles[fname]) {
-      matched++;
-    } else if (fname) {
-      missing.push(fname);
+async function handleDesignFiles(files) {
+  if (runnerActive) return;
+  const revision = ++designRevision;
+  designFiles = Object.create(null);
+  clearPreviews();
+  $('#toStep3').disabled = true;
+  showError();
+  try {
+    const images = Array.from(files).filter(f => /\.(png|jpe?g)$/i.test(f.name) || ['image/png', 'image/jpeg'].includes(f.type));
+    if (!images.length) throw new Error('Select at least one PNG or JPEG image.');
+    if (new Set(images.map(f => f.name)).size !== images.length) throw new Error('Duplicate image filenames found. Rename them so each filename is unique.');
+    for (let i = 0; i < images.length; i++) {
+      const file = images[i];
+      if (file.size > 25 * 1024 * 1024) throw new Error(`${file.name}: exceeds the 25 MiB transfer limit.`);
+      const bytes = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+      const png = [137,80,78,71,13,10,26,10].every((n,i) => bytes[i] === n);
+      const jpeg = bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+      if (!png && !jpeg) throw new Error(`${file.name}: file contents are not PNG or JPEG.`);
+      // Normalize MIME type from the bytes, including OS file pickers with no MIME type.
+      const normalized = new File([file], file.name, {type: png ? 'image/png' : 'image/jpeg'});
+      try { const bitmap = await createImageBitmap(normalized); bitmap.close(); }
+      catch { throw new Error(`${file.name}: image is corrupt or cannot be decoded by Chrome.`); }
+      if (revision !== designRevision) return;
+      images[i] = normalized;
     }
-  });
-
-  if (missing.length === 0) {
-    matchEl.innerHTML = `<span class="match-ok">✓ All ${matched} designs matched to CSV rows</span>`;
-  } else {
-    matchEl.innerHTML = `<span class="match-warn">⚠ ${matched} matched, ${missing.length} missing: ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? '...' : ''}</span>`;
+    if (revision !== designRevision) return;
+    images.forEach(file => { designFiles[file.name] = file; });
+    $('#designCount').textContent = `${images.length} images loaded`;
+    $('#designInfo').style.display = 'block';
+    $('#designDropZone').style.display = 'none';
+    for (const file of images.slice(0, 8)) {
+      const img = document.createElement('img');
+      img.className = 'design-thumb'; img.alt = file.name;
+      img.src = URL.createObjectURL(file); previewURLs.push(img.src);
+      $('#designPreview').appendChild(img);
+    }
+    resetQueue(); checkDesignMatches();
+  } catch (error) {
+    if (revision !== designRevision) return;
+    $('#designInfo').style.display = 'none';
+    $('#designDropZone').style.display = '';
+    showError(error.message);
   }
-
-  $('#toStep3').disabled = false;
 }
-
-function findDesignKey(row) {
-  if (!row) return null;
-  const keys = Object.keys(row);
-  const candidates = ['design_filename', 'design', 'filename', 'file', 'image', 'design_file', 'file_name', 'image_file'];
-  for (const c of candidates) {
-    if (keys.includes(c)) return c;
-  }
-  // Partial match
-  for (const k of keys) {
-    if (k.includes('design') || k.includes('file') || k.includes('image')) return k;
-  }
-  return null;
+bindDrop($('#designDropZone'), () => $($('#selectFolder').checked ? '#designInput' : '#designFilesInput'), handleDesignFiles);
+$('#designReplace').addEventListener('click', () => {
+  $($('#selectFolder').checked ? '#designInput' : '#designFilesInput').click();
+});
+$('#selectFiles').addEventListener('click', () => { $('#selectFolder').checked = false; $('#designFilesInput').click(); });
+for (const id of ['designInput', 'designFilesInput']) $('#' + id).addEventListener('change', e => { handleDesignFiles(e.target.files); e.target.value = ''; });
+function checkDesignMatches() {
+  const result = MerchCore.matchDesigns(csvData, Object.values(designFiles));
+  const el = $('#matchStatus');
+  el.className = `match-status ${result.valid ? 'match-ok' : 'match-warn'}`;
+  el.textContent = result.valid ? `✓ All ${csvData.length} designs matched to CSV rows` :
+    result.missing.length ? `Missing designs: ${result.missing.slice(0, 5).join(', ')}${result.missing.length > 5 ? '…' : ''}` : 'Import a valid CSV and matching images.';
+  $('#toStep3').disabled = !result.valid;
+  return result.valid;
 }
-
 $('#backToStep1').addEventListener('click', () => goToStep(1));
-$('#toStep3').addEventListener('click', () => {
-  buildQueue();
-  goToStep(3);
-});
-
-// ── Tab Stepper ──────────────────────
-$('#tabsMinus').addEventListener('click', () => {
-  if (concurrentTabs > 1) {
-    concurrentTabs--;
-    $('#tabsCount').textContent = concurrentTabs;
-  }
-});
-
-$('#tabsPlus').addEventListener('click', () => {
-  if (concurrentTabs < 10) {
-    concurrentTabs++;
-    $('#tabsCount').textContent = concurrentTabs;
-  }
-});
-
-// ── Queue ────────────────────────────
+$('#toStep3').addEventListener('click', () => { if (checkDesignMatches()) { buildQueue(); goToStep(3); } });
+$('#backToStep2').addEventListener('click', () => goToStep(2));
+$('#tabsMinus').addEventListener('click', () => { concurrentTabs = Math.max(1, concurrentTabs - 1); $('#tabsCount').textContent = concurrentTabs; });
+$('#tabsPlus').addEventListener('click', () => { concurrentTabs = Math.min(10, concurrentTabs + 1); $('#tabsCount').textContent = concurrentTabs; });
 function buildQueue() {
-  const list = $('#queueList');
-  list.innerHTML = '';
-
-  const designKey = csvData.length > 0 ? findDesignKey(csvData[0]) : null;
-
-  csvData.forEach((row, i) => {
-    const titleKey = Object.keys(row).find(k => k === 'title' || k.includes('title'));
-    const title = titleKey ? row[titleKey] : `Listing ${i + 1}`;
-
-    const item = document.createElement('div');
-    item.className = 'queue-item';
-    item.id = `queue-${i}`;
-    item.innerHTML = `
-      <span class="queue-num">#${i + 1}</span>
-      <span class="queue-title">${escapeHtml(title)}</span>
-      <span class="queue-status status-pending">Pending</span>
-    `;
-    list.appendChild(item);
+  $('#queueList').replaceChildren();
+  csvData.forEach((row, index) => {
+    const item = document.createElement('div'); item.className = 'queue-item'; item.id = `queue-${index}`;
+    const num = document.createElement('span'); num.className = 'queue-num'; num.textContent = `#${index + 1}`;
+    const title = document.createElement('span'); title.className = 'queue-title'; title.textContent = row.title;
+    const status = document.createElement('span'); status.className = 'queue-status status-pending'; status.textContent = statuses[index] || 'pending';
+    item.append(num, title, status); $('#queueList').appendChild(item);
   });
 }
-
-function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
+function updateQueueStatus(index, status, text) {
+  statuses[index] = status;
+  const el = $(`#queue-${index} .queue-status`);
+  if (el) { el.className = `queue-status status-${status}`; el.textContent = text; }
 }
-
-// ── Upload Orchestration ─────────────
-$('#backToStep2').addEventListener('click', () => goToStep(2));
-
-$('#startUpload').addEventListener('click', startUpload);
-$('#stopUpload').addEventListener('click', stopUpload);
-
-async function startUpload() {
-  isUploading = true;
-  $('#startUpload').style.display = 'none';
-  $('#stopUpload').style.display = '';
-  $('#backToStep2').style.display = 'none';
-  $('#progressSection').style.display = 'block';
-
-  const delay = parseInt($('#actionDelay').value) || 1500;
-  const productType = $('#productType').value;
-  const designKey = csvData.length > 0 ? findDesignKey(csvData[0]) : null;
-
-  let completed = 0;
-  let failed = 0;
-  const total = csvData.length;
-
-  addLog('info', `Starting upload of ${total} listings (${concurrentTabs} tabs)...`);
-
-  // Process in batches of concurrentTabs
-  for (let batch = 0; batch < total && isUploading; batch += concurrentTabs) {
-    const batchItems = csvData.slice(batch, Math.min(batch + concurrentTabs, total));
-    const batchIndices = batchItems.map((_, i) => batch + i);
-
-    addLog('info', `Batch ${Math.floor(batch / concurrentTabs) + 1}: Opening ${batchItems.length} tabs...`);
-
-    // Mark active
-    batchIndices.forEach(i => updateQueueStatus(i, 'active', 'Uploading'));
-
-    // Prepare data for each item in the batch
-    const uploadPromises = batchItems.map(async (row, bIdx) => {
-      const idx = batch + bIdx;
-
-      try {
-        // Collect row data with flexible key matching
-        const listing = {
-          title: getField(row, ['title']),
-          brand: getField(row, ['brand_name', 'brand']),
-          bullet1: getField(row, ['bullet_point_1', 'bullet1', 'bullet_1']),
-          bullet2: getField(row, ['bullet_point_2', 'bullet2', 'bullet_2']),
-          description: getField(row, ['description', 'desc']),
-          productType: productType,
-          delay: delay
-        };
-
-        // Get design file
-        let designFile = null;
-        if (designKey && row[designKey]) {
-          designFile = designFiles[row[designKey]];
-        }
-        // Fallback: try to match by index
-        if (!designFile) {
-          const allFiles = Object.values(designFiles);
-          if (allFiles[idx]) designFile = allFiles[idx];
-        }
-
-        // Convert design file to base64 for transfer
-        let designBase64 = null;
-        if (designFile) {
-          designBase64 = await fileToBase64(designFile);
-        }
-
-        // Open tab and execute upload
-        const tab = await chrome.tabs.create({
-          url: 'https://merch.amazon.com/designs/new',
-          active: false
-        });
-
-        // Wait for tab to load
-        await waitForTabLoad(tab.id);
-        await sleep(delay);
-
-        // Inject content script
-        addLog('info', `#${idx + 1}: Injecting content script...`);
-        await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          files: ['content.js']
-        });
-
-        // Wait for content script to initialize
-        await sleep(2000);
-
-        // Send listing data to content script
-        addLog('info', `#${idx + 1}: Sending data to tab...`);
-        let response;
-        try {
-          response = await chrome.tabs.sendMessage(tab.id, {
-            action: 'FILL_LISTING',
-            listing: listing,
-            designBase64: designBase64,
-            designFileName: designFile ? designFile.name : null
-          });
-        } catch (msgErr) {
-          // Retry once if message fails
-          addLog('warn', `#${idx + 1}: First message failed, retrying...`);
-          await sleep(2000);
-          await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            files: ['content.js']
-          });
-          await sleep(1000);
-          response = await chrome.tabs.sendMessage(tab.id, {
-            action: 'FILL_LISTING',
-            listing: listing,
-            designBase64: designBase64,
-            designFileName: designFile ? designFile.name : null
-          });
-        }
-
-        if (response && response.success) {
-          completed++;
-          updateQueueStatus(idx, 'done', 'Done');
-          addLog('ok', `✓ #${idx + 1}: "${listing.title}" uploaded`);
-        } else {
-          throw new Error(response?.error || 'Unknown error');
-        }
-
-        // Close tab after completion
-        await sleep(1000);
-        try { await chrome.tabs.remove(tab.id); } catch (e) {}
-
-      } catch (err) {
-        failed++;
-        updateQueueStatus(idx, 'error', 'Failed');
-        addLog('err', `✗ #${idx + 1}: ${err.message}`);
-      }
-
-      updateProgress(completed + failed, total);
-    });
-
-    await Promise.all(uploadPromises);
-    await sleep(delay);
-  }
-
-  addLog(failed === 0 ? 'ok' : 'warn',
-    `Upload complete: ${completed} succeeded, ${failed} failed out of ${total}`
-  );
-  isUploading = false;
-  $('#stopUpload').style.display = 'none';
+function addTabLink(index, tabId) {
+  const link = document.createElement('a'); link.href = '#'; link.textContent = 'View';
+  link.addEventListener('click', async e => {
+    e.preventDefault();
+    try { const tab = await chrome.tabs.update(tabId, {active: true}); await chrome.windows.update(tab.windowId, {focused: true}); }
+    catch { showError('That Amazon tab has been closed.'); }
+  });
+  $(`#queue-${index}`).appendChild(link);
 }
-
-function stopUpload() {
-  isUploading = false;
-  addLog('warn', 'Upload stopped by user');
-  $('#stopUpload').style.display = 'none';
-  $('#startUpload').style.display = '';
-  $('#startUpload').innerHTML = `
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-      <path d="M4 2L16 9L4 16V2Z" fill="currentColor"/>
-    </svg>
-    Resume Upload
-  `;
-  $('#backToStep2').style.display = '';
+function updateProgress() {
+  const done = statuses.filter(s => s !== 'pending' && s !== 'active').length;
+  const pct = csvData.length ? Math.round(done / csvData.length * 100) : 0;
+  $('#progressBar').style.width = `${pct}%`; $('#progressText').textContent = `${done} / ${csvData.length}`; $('#progressPercent').textContent = `${pct}%`;
 }
-
-// ── Helpers ──────────────────────────
-function getField(row, possibleKeys) {
-  for (const key of possibleKeys) {
-    if (row[key] !== undefined) return row[key];
-  }
-  // Fuzzy match
-  const rowKeys = Object.keys(row);
-  for (const pk of possibleKeys) {
-    const found = rowKeys.find(k => k.includes(pk));
-    if (found) return row[found];
-  }
-  return '';
+function addLog(type, message) {
+  const line = document.createElement('div'); line.className = `log-${type}`;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+  $('#logArea').appendChild(line); $('#logArea').scrollTop = $('#logArea').scrollHeight;
 }
-
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
+    const reader = new FileReader(); reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error(`Cannot read ${file.name}.`)); reader.readAsDataURL(file);
   });
 }
-
-function waitForTabLoad(tabId) {
-  return new Promise((resolve) => {
-    const listener = (id, changeInfo) => {
-      if (id === tabId && changeInfo.status === 'complete') {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }
+function waitForTabLoad(tabId, timeout = 30000) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = error => {
+      if (settled) return; settled = true; clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(updated); chrome.tabs.onRemoved.removeListener(removed);
+      error ? reject(error) : resolve();
     };
-    chrome.tabs.onUpdated.addListener(listener);
-
-    // Timeout after 30s
-    setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(listener);
-      resolve();
-    }, 30000);
+    const updated = (id, change) => { if (id === tabId && change.status === 'complete') finish(); };
+    const removed = id => { if (id === tabId) finish(new Error('Amazon tab was closed.')); };
+    const timer = setTimeout(() => finish(new Error('Amazon page load timed out. Check the tab and your connection.')), timeout);
+    chrome.tabs.onUpdated.addListener(updated); chrome.tabs.onRemoved.addListener(removed);
+    // Handles tabs that completed before the listener was attached.
+    chrome.tabs.get(tabId).then(tab => { if (tab.status === 'complete') finish(); }, finish);
   });
 }
-
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}
-
-function updateQueueStatus(index, status, text) {
-  const el = $(`#queue-${index} .queue-status`);
-  if (el) {
-    el.className = `queue-status status-${status}`;
-    el.textContent = text;
+function checkRunning() { if (!isUploading) throw new Error('Stopped by user. Inspect the Amazon tab before retrying this row.'); }
+function lockControls(locked) {
+  document.querySelectorAll('button, input, select').forEach(el => { if (el.id !== 'stopUpload') el.disabled = locked; });
+  if (!locked) {
+    $('#toStep2').disabled = !csvData.length; checkDesignMatches();
+    $('#startUpload').disabled = !statuses.includes('pending');
   }
 }
-
-function updateProgress(done, total) {
-  const pct = Math.round((done / total) * 100);
-  $('#progressBar').style.width = `${pct}%`;
-  $('#progressText').textContent = `${done} / ${total}`;
-  $('#progressPercent').textContent = `${pct}%`;
+async function processRow(index, delay, autoPublish) {
+  const row = csvData[index];
+  updateQueueStatus(index, 'active', 'Preparing');
+  try {
+    checkRunning();
+    const file = designFiles[row.design_filename];
+    if (!file) throw new Error(`Missing design: ${row.design_filename}`);
+    const designBase64 = await fileToBase64(file); checkRunning();
+    const tab = await chrome.tabs.create({url: 'https://merch.amazon.com/designs/new', active: false});
+    activeTabs.set(index, tab.id); addTabLink(index, tab.id);
+    await waitForTabLoad(tab.id); checkRunning();
+    const loaded = await chrome.tabs.get(tab.id);
+    const url = new URL(loaded.url || 'about:blank');
+    if (url.protocol !== 'https:' || url.hostname !== 'merch.amazon.com' || /signin|login/i.test(url.pathname)) {
+      throw new Error('Sign into Merch on Demand in Chrome, then inspect this tab before retrying.');
+    }
+    await chrome.scripting.executeScript({target: {tabId: tab.id}, files: ['content.js']}); checkRunning();
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      action: 'FILL_LISTING', autoPublish, designBase64, designFileName: file.name,
+      listing: {title: row.title, brand: row.brand_name, bullet1: row.bullet_point_1, bullet2: row.bullet_point_2, description: row.description, delay}
+    });
+    // Never retry a message that may already have uploaded or submitted a design.
+    if (!response?.success) throw new Error(response?.error || 'No response from Amazon tab. Inspect it before retrying.');
+    if (!['prepared', 'submitted'].includes(response.status)) throw new Error('Unexpected content-script response. Inspect the Amazon tab.');
+    updateQueueStatus(index, response.status, response.status === 'prepared' ? 'Review' : 'Submitted · unverified');
+    addLog('ok', `#${index + 1}: ${response.status === 'prepared' ? 'Prepared for manual review' : 'Publish clicked; verify submission in Amazon'}.`);
+  } catch (error) {
+    updateQueueStatus(index, isUploading ? 'error' : 'stopped', isUploading ? 'Failed' : 'Stopped');
+    addLog('err', `#${index + 1}: ${error.message}`);
+  } finally { activeTabs.delete(index); updateProgress(); }
 }
-
-function addLog(type, message) {
-  const log = $('#logArea');
-  const line = document.createElement('div');
-  line.className = `log-${type}`;
-  line.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-  log.appendChild(line);
-  log.scrollTop = log.scrollHeight;
+async function startUpload() {
+  if (runnerActive || !checkDesignMatches() || !statuses.includes('pending')) return;
+  showError();
+  if (!globalThis.chrome?.tabs || !chrome.scripting) { showError('Open this uploader from the installed Chrome extension to prepare listings.'); return; }
+  const delay = Number($('#actionDelay').value);
+  if (!Number.isInteger(delay) || delay < 500 || delay > 10000) { showError('Action delay must be an integer from 500 to 10000 ms.'); return; }
+  const autoPublish = $('#autoPublish').checked;
+  if (autoPublish && !confirm('Automatically click Publish for each listing using Amazon’s current product, price and marketplace defaults? Submissions cannot be undone by Stop. Only continue if you have tested these defaults.')) return;
+  runnerActive = true; isUploading = true; lockControls(true);
+  $('#stopUpload').style.display = ''; $('#stopUpload').disabled = false; $('#stopUpload').textContent = 'Stop';
+  $('#progressSection').style.display = 'block'; updateProgress();
+  const pending = statuses.map((status, index) => status === 'pending' ? index : -1).filter(i => i >= 0);
+  addLog('info', `Preparing ${pending.length} pending listings, ${concurrentTabs} tab(s) at a time.`);
+  try {
+    for (let offset = 0; offset < pending.length && isUploading; offset += concurrentTabs) {
+      await Promise.all(pending.slice(offset, offset + concurrentTabs).map(index => processRow(index, delay, autoPublish)));
+    }
+  } finally {
+    isUploading = false; runnerActive = false; lockControls(false);
+    $('#stopUpload').style.display = 'none';
+    $('#startUpload').textContent = statuses.includes('pending') ? 'Continue Pending Listings' : 'Queue Finished';
+    const count = status => statuses.filter(s => s === status).length;
+    addLog('info', `Queue settled: ${count('prepared')} prepared, ${count('submitted')} submitted (unverified), ${count('error')} failed, ${count('stopped')} stopped, ${count('pending')} pending. Inspect retained Amazon tabs.`);
+  }
 }
+function stopUpload() {
+  if (!runnerActive) return;
+  isUploading = false;
+  $('#stopUpload').disabled = true; $('#stopUpload').textContent = 'Stopping…';
+  addLog('warn', 'Stopping active work and leaving all Amazon tabs open. Already submitted listings cannot be cancelled.');
+  for (const tabId of activeTabs.values()) chrome.tabs.sendMessage(tabId, {action: 'CANCEL_FILL'}).catch(() => {});
+}
+$('#startUpload').addEventListener('click', startUpload);
+$('#stopUpload').addEventListener('click', stopUpload);
+window.addEventListener('beforeunload', e => {
+  if (runnerActive) { stopUpload(); e.preventDefault(); e.returnValue = ''; }
+});
+window.addEventListener('unload', clearPreviews);
