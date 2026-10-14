@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Merch on Demand Bulk Uploader",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Bulk upload t-shirt designs to Amazon Merch on Demand from a CSV file",
   "permissions": [
     "tabs",

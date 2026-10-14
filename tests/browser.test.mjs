@@ -176,5 +176,51 @@ test('missing content field reports timeout and never clicks Publish',async()=>{
     const original=Date.now;let clock=original();Date.now=()=>clock+=1000;
     try{const result=await message({...fill,autoPublish:true});return{result,published};}finally{Date.now=original;}
   })()`);
-  assert.equal(result.result.success,false);assert.match(result.result.error,/Timed out waiting for field description/);assert.equal(result.published,0);
+  assert.equal(result.result.success,false);assert.match(result.result.error,/Missing fields: description/);assert.equal(result.published,0);
+  assert.ok(result.result.fieldDiagnostics.some(field => field.id === 'designCreator-productEditor-brandName'));
+  assert.ok(result.result.fieldDiagnostics.every(field => !('value' in field)));
+});
+
+test('listing fields without legacy localized IDs are found by Angular names and labels',async()=>{
+  const p=await contentFixture();
+  const result=await p.evaluate(`(async()=>{
+    const title=document.querySelector('#prdm-copy-designCreator-productEditor-title-en');title.id='current-title';title.setAttribute('formcontrolname','title');
+    const b1=document.querySelector('#prdm-copy-designCreator-productEditor-featureBullet1-en');b1.id='current-bullet-one';b1.setAttribute('name','featureBullet1');
+    const b2=document.querySelector('#prdm-copy-designCreator-productEditor-featureBullet2-en');b2.id='current-bullet-two';b2.setAttribute('aria-label','Bullet point 2 (optional)');
+    const description=document.querySelector('#designCreator-productEditor-description');description.id='current-description';
+    const label=document.createElement('label');label.htmlFor=description.id;label.textContent='Product description';document.body.appendChild(label);
+    const foreign=document.createElement('textarea');foreign.setAttribute('formcontrolname','title-fr');document.body.appendChild(foreign);
+    const hidden=document.createElement('textarea');hidden.setAttribute('formcontrolname','title');hidden.style.display='none';document.body.appendChild(hidden);
+    const result=await message(fill);return{result,title:title.value,b1:b1.value,b2:b2.value,description:description.value,foreign:foreign.value,hidden:hidden.value};
+  })()`);
+  assert.equal(result.result.status,'prepared');assert.equal(result.title,'Cat "&" programmer');assert.equal(result.b1,'');assert.equal(result.b2,'Second');assert.equal(result.description,'Line one\nLine two');assert.equal(result.foreign,'');assert.equal(result.hidden,'');
+});
+test('localized IDs on component wrappers resolve the editable textarea inside open shadow DOM',async()=>{
+  const p=await contentFixture();
+  const result=await p.evaluate(`(async()=>{
+    const old=document.querySelector('#prdm-copy-designCreator-productEditor-title-en');
+    const wrapper=document.createElement('div');wrapper.id=old.id;old.replaceWith(wrapper);
+    const shadow=wrapper.attachShadow({mode:'open'});shadow.innerHTML='<textarea></textarea>';
+    const result=await message(fill);return{result,title:shadow.querySelector('textarea').value};
+  })()`);
+  assert.equal(result.result.status,'prepared');assert.equal(result.title,'Cat "&" programmer');
+});
+test('brand-only early rendering waits for the rest of the editor before filling',async()=>{
+  const p=await contentFixture();
+  const result=await p.evaluate(`(async()=>{
+    const title=document.querySelector('#prdm-copy-designCreator-productEditor-title-en');title.remove();
+    let brandBeforeEditor=null;
+    setTimeout(()=>{brandBeforeEditor=document.querySelector('#designCreator-productEditor-brandName').value;document.body.appendChild(title);},700);
+    const result=await message(fill);return{result,brandBeforeEditor,title:title.value};
+  })()`);
+  assert.equal(result.result.status,'prepared');assert.equal(result.brandBeforeEditor,'');assert.equal(result.title,'Cat "&" programmer');
+});
+test('ambiguous visible title fields fail before a partial brand-only fill',async()=>{
+  const p=await contentFixture();
+  const result=await p.evaluate(`(async()=>{
+    const title=document.querySelector('#prdm-copy-designCreator-productEditor-title-en');title.id='current-title';title.setAttribute('name','title');
+    const duplicate=document.createElement('textarea');duplicate.setAttribute('formcontrolname','title');document.body.appendChild(duplicate);
+    const result=await message(fill);return{result,brand:document.querySelector('#designCreator-productEditor-brandName').value,published};
+  })()`);
+  assert.equal(result.result.success,false);assert.match(result.result.error,/Multiple visible controls/);assert.equal(result.brand,'');assert.equal(result.published,0);
 });

@@ -1,6 +1,6 @@
 # Merch on Demand Bulk Uploader
 
-A dependency-free Chrome Manifest V3 extension that imports a CSV, matches design images by filename, and prepares Merch on Demand listing tabs. Version 1.1 opens a **regular extension tab** when you click its toolbar icon, so switching to Amazon does not close the controller or interrupt the queue.
+A dependency-free Chrome Manifest V3 extension that imports a CSV, matches design images by filename, and prepares Merch on Demand listing tabs. Version 1.1.1 opens a **regular extension tab** when you click its toolbar icon, so switching to Amazon does not close the controller or interrupt the queue.
 
 By default it uploads the image and fills the listing text, then leaves the Amazon tab open for manual review and publishing. Optional automatic submission clicks Publish using Amazon's current defaults; **Submitted · unverified means a click was sent, not that Amazon accepted or published the listing**. Tabs remain open in both modes.
 
@@ -9,7 +9,7 @@ By default it uploads the image and fills the listing text, then leaves the Amaz
 1. Download/extract the extension archive, or download/clone this repository to your computer. Keep the folder containing `manifest.json`, `core.js`, `popup.html`, the other JS/CSS files, and `icons/` together.
 2. Open `chrome://extensions` in desktop Chrome 102 or later (a current stable version is recommended).
 3. Turn on **Developer mode**, click **Load unpacked**, and select the folder containing `manifest.json`.
-4. Confirm **Merch on Demand Bulk Uploader 1.1.0** appears without an Errors warning. All three PNG icons are included (16, 48 and 128 pixels).
+4. Confirm **Merch on Demand Bulk Uploader 1.1.1** appears without an Errors warning. All three PNG icons are included (16, 48 and 128 pixels).
 5. Use Chrome's Extensions menu to pin the icon, then click it. The uploader opens in a tab. Clicking the icon again focuses that tab instead of creating another controller.
 6. After changing source files, click **Reload** on the extension card and reopen the uploader. Refresh existing Amazon tabs before another test so they do not retain the previous content script.
 
@@ -78,3 +78,9 @@ For a standalone UI preview, run `python3 -m http.server 8765 --bind 127.0.0.1` 
 Automated checks cover CSV edge cases, icon existence/dimensions, persistent-controller launch logic with Chrome API mocks, real browser imports/matching/queue display, bounded concurrency, stop/continue, tab readiness/timeouts, non-retry after disconnect, content-script reinjection, native input events, JPEG MIME preservation, missing/disabled/oversized/discarded fields, cancellation and manual/automatic submission behavior on a local DOM fixture.
 
 **Not verified in the cloud:** native unpacked-extension installation and Chrome API integration (managed Chromium policy blocks extension installation); Amazon's current authenticated DOM and Angular behavior; actual image processing; product/price/marketplace configuration; account quotas; server acceptance or publication. Local fixtures do not establish those behaviors. Complete the one-listing Chrome test above before bulk use.
+
+## Listing-field correction in 1.1.1
+
+The listing editor can render after the brand field, and its title/bullet/description controls may use different IDs. The extension now waits up to 60 seconds for the complete editor, supports English and unlocalized Angular control names, associated labels, ARIA labels, component wrappers and open shadow roots, and excludes hidden copies and explicitly non-English field names. Ambiguous matches fail rather than filling a different editor. Input events now include their input type and cross shadow-root boundaries. On failure, the queue log includes visible field identifiers (never field values) to help diagnose further Amazon changes.
+
+To install this correction, extract the new ZIP into your extension folder, click **Reload** in `chrome://extensions`, confirm version **1.1.1**, and close/reopen the uploader. Refresh or close any Amazon tabs from the previous attempt so they cannot retain an older injected script. Test one listing with automatic Publish unchecked. If a field remains missing, copy the queue error and the visible-field-identifiers line for diagnosis.

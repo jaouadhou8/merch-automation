@@ -236,7 +236,10 @@ async function processRow(index, delay, autoPublish) {
       listing: {title: row.title, brand: row.brand_name, bullet1: row.bullet_point_1, bullet2: row.bullet_point_2, description: row.description, delay}
     });
     // Never retry a message that may already have uploaded or submitted a design.
-    if (!response?.success) throw new Error(response?.error || 'No response from Amazon tab. Inspect it before retrying.');
+    if (!response?.success) {
+      if (response?.fieldDiagnostics?.length) addLog('info', `#${index + 1} visible field identifiers: ${JSON.stringify(response.fieldDiagnostics)}`);
+      throw new Error(response?.error || 'No response from Amazon tab. Inspect it before retrying.');
+    }
     if (!['prepared', 'submitted'].includes(response.status)) throw new Error('Unexpected content-script response. Inspect the Amazon tab.');
     updateQueueStatus(index, response.status, response.status === 'prepared' ? 'Review' : 'Submitted · unverified');
     addLog('ok', `#${index + 1}: ${response.status === 'prepared' ? 'Prepared for manual review' : 'Publish clicked; verify submission in Amazon'}.`);

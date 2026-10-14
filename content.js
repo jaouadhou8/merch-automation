@@ -20,7 +20,7 @@
     if (msg?.action !== 'FILL_LISTING') return;
     if (currentRun) { sendResponse({success: false, error: 'This tab is already preparing a listing.'}); return; }
     const run = {cancelled: false}; currentRun = run;
-    fillListing(msg, run).then(sendResponse, error => sendResponse({success: false, error: error.message}))
+    fillListing(msg, run).then(sendResponse, error => sendResponse({success: false, error: error.message, fieldDiagnostics: fieldDiagnostics()}))
       .finally(() => { removeOverlay(); currentRun = null; });
     return true;
   });
@@ -44,8 +44,77 @@
     } while (Date.now() < deadline);
     throw new Error(`Timed out waiting for ${label}. Check login, image processing and Amazon page changes.`);
   }
+  const fieldNames = {
+    brandName: ['brandName', 'brand', 'brand name'],
+    'title-en': ['title-en', 'title', 'productTitle', 'designTitle', 'product title', 'design title'],
+    'featureBullet1-en': ['featureBullet1-en', 'featureBullet1', 'bulletPoint1', 'bullet1', 'bullet point 1', 'feature bullet 1'],
+    'featureBullet2-en': ['featureBullet2-en', 'featureBullet2', 'bulletPoint2', 'bullet2', 'bullet point 2', 'feature bullet 2'],
+    description: ['description-en', 'description', 'productDescription', 'product description']
+  };
+  const normalize = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  function searchRoots() {
+    const roots = [document];
+    for (let i = 0; i < roots.length; i++) {
+      for (const element of roots[i].querySelectorAll('*')) if (element.shadowRoot) roots.push(element.shadowRoot);
+    }
+    return roots;
+  }
+  function visible(element) {
+    const style = getComputedStyle(element);
+    return element.getClientRects().length > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+  }
+  function textControl(element) {
+    return element.tagName === 'TEXTAREA' || (element.tagName === 'INPUT' && ['text', 'search', 'email', 'url', 'tel'].includes(element.type));
+  }
+  function controlsIn(element) {
+    if (textControl(element)) return [element];
+    const roots = [element];
+    if (element.shadowRoot) roots.push(element.shadowRoot);
+    return roots.flatMap(root => Array.from(root.querySelectorAll('input, textarea')).filter(textControl));
+  }
+  function matchesName(value, name) {
+    const normalized = normalize(String(value || '').replace(/\((?:required|optional|english)\)|\*/gi, '')).replace(/^prdmcopy/, '').replace(/^designcreatorproducteditor/, '');
+    return fieldNames[name].some(alias => {
+      const expected = normalize(alias);
+      return normalized === expected || normalized === expected + 'en' || normalized === expected + 'enus' || normalized === expected + 'engb';
+    });
+  }
   function findField(selector, name) {
-    return document.querySelector(selector) || document.querySelector(`[formcontrolname="${name}"]`);
+    const roots = searchRoots();
+    const exact = new Set();
+    for (const root of roots) {
+      for (const element of root.querySelectorAll(selector)) {
+        controlsIn(element).filter(visible).forEach(control => exact.add(control));
+      }
+    }
+    if (exact.size === 1) return [...exact][0];
+    if (exact.size > 1) throw new Error(`Multiple visible controls match ${name}. Select one English listing editor.`);
+    const matches = new Set();
+    for (const root of roots) {
+      const labels = Array.from(root.querySelectorAll('label'));
+      for (const element of root.querySelectorAll('input, textarea, [formcontrolname], [data-testid], [name], [aria-label], [id]')) {
+        const values = ['id', 'name', 'formcontrolname', 'aria-label', 'placeholder', 'data-testid'].map(attr => element.getAttribute(attr));
+        const labelledBy = (element.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+          .map(id => root.getElementById?.(id)?.textContent || '').join(' ');
+        values.push(labelledBy);
+        for (const label of labels) {
+          if ((element.id && label.htmlFor === element.id) || label.contains(element)) values.push(label.textContent);
+        }
+        if (values.some(value => matchesName(value, name))) {
+          controlsIn(element).filter(visible).forEach(control => matches.add(control));
+        }
+      }
+    }
+    if (matches.size > 1) throw new Error(`Multiple visible controls match ${name}. Select one English listing editor.`);
+    return matches.size ? [...matches][0] : null;
+  }
+  function fieldDiagnostics() {
+    // Identifiers only: never include typed text, artwork or other form values.
+    return searchRoots().flatMap(root => Array.from(root.querySelectorAll('input, textarea')))
+      .filter(element => textControl(element) && visible(element)).slice(0, 30)
+      .map(element => ({tag: element.tagName.toLowerCase(), id: element.id,
+        name: element.getAttribute('name') || '', control: element.getAttribute('formcontrolname') || '',
+        label: element.getAttribute('aria-label') || ''}));
   }
   async function fillField(selector, name, value, run) {
     const element = await waitFor(() => findField(selector, name), `field ${name}`, 15000, run);
@@ -60,7 +129,7 @@
     const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
     if (!setter) throw new Error(`Cannot set field ${name}.`);
     setter.call(element, value);
-    element.dispatchEvent(new Event('input', {bubbles: true}));
+    element.dispatchEvent(new InputEvent('input', {bubbles: true, composed: true, inputType: value ? 'insertText' : 'deleteContentBackward', data: value || null}));
     element.dispatchEvent(new Event('change', {bubbles: true}));
     element.blur();
     await sleep(150, run);
@@ -105,6 +174,15 @@
       const field = findField(fields[0][1], fields[0][2]);
       return field && !field.disabled ? field : null;
     }, 'product editor', 60000, run);
+    // Amazon can render the brand field before the localized listing editor.
+    // Wait for the full editor rather than leaving a brand-only partial fill.
+    let missingFields = [];
+    await waitFor(() => {
+      missingFields = fields.filter(([, selector, name]) => !findField(selector, name)).map(([key]) => key);
+      return missingFields.length === 0;
+    }, 'complete listing editor (title, bullet points and description)', 60000, run).catch(error => {
+      throw new Error(`${error.message} Missing fields: ${missingFields.join(', ')}.`);
+    });
     for (const [key, selector, name] of fields) {
       updateOverlay(`Filling ${key}…`);
       await fillField(selector, name, listing[key], run);
