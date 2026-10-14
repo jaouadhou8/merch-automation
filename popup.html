@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Merch Bulk Uploader</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <rect width="28" height="28" rx="6" fill="#FF6B2C"/>
+          <path d="M8 10L14 6L20 10V18L14 22L8 18V10Z" stroke="white" stroke-width="1.5" fill="none"/>
+          <path d="M14 6V22M8 10L20 18M20 10L8 18" stroke="white" stroke-width="1" opacity="0.5"/>
+        </svg>
+        <div>
+          <h1>Merch Uploader</h1>
+          <span class="version">v1.0</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Steps -->
+    <div class="steps">
+      <div class="step active" data-step="1">
+        <div class="step-num">1</div>
+        <span>CSV</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step" data-step="2">
+        <div class="step-num">2</div>
+        <span>Designs</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step" data-step="3">
+        <div class="step-num">3</div>
+        <span>Upload</span>
+      </div>
+    </div>
+
+    <!-- Step 1: CSV Upload -->
+    <section id="step1" class="panel">
+      <div class="upload-zone" id="csvDropZone">
+        <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+          <rect x="4" y="8" width="32" height="26" rx="3" stroke="#FF6B2C" stroke-width="1.5" fill="none"/>
+          <path d="M12 18H28M12 23H28M12 28H20" stroke="#FF6B2C" stroke-width="1.5" stroke-linecap="round"/>
+          <path d="M20 2V12M16 8L20 4L24 8" stroke="#FF6B2C" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <p class="upload-title">Drop CSV file here</p>
+        <p class="upload-sub">or click to browse</p>
+        <input type="file" id="csvInput" accept=".csv" hidden>
+      </div>
+
+      <div id="csvInfo" class="info-card" style="display:none;">
+        <div class="info-header">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M8 1L15 14H1L8 1Z" fill="#22C55E"/>
+          </svg>
+          <span id="csvFileName">file.csv</span>
+          <button id="csvRemove" class="btn-icon" title="Remove">✕</button>
+        </div>
+        <div class="info-stats">
+          <div class="stat">
+            <span class="stat-val" id="csvRows">0</span>
+            <span class="stat-label">Listings</span>
+          </div>
+          <div class="stat">
+            <span class="stat-val" id="csvCols">0</span>
+            <span class="stat-label">Columns</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="csv-format">
+        <h3>Expected CSV Format</h3>
+        <div class="format-cols">
+          <code>Title</code>
+          <code>Brand name</code>
+          <code>Bullet point 1</code>
+          <code>Bullet point 2</code>
+          <code>Description</code>
+          <code>Design filename</code>
+        </div>
+        <p class="note">Design filename should match the image file name in your design folder (e.g., <code>design001.png</code>)</p>
+      </div>
+
+      <button id="toStep2" class="btn-primary" disabled>
+        Continue to Designs
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M6 3L11 8L6 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </section>
+
+    <!-- Step 2: Design Folder -->
+    <section id="step2" class="panel" style="display:none;">
+      <div class="upload-zone" id="designDropZone">
+        <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+          <rect x="2" y="6" width="36" height="28" rx="3" stroke="#FF6B2C" stroke-width="1.5" fill="none"/>
+          <circle cx="14" cy="16" r="4" stroke="#FF6B2C" stroke-width="1.5" fill="none"/>
+          <path d="M2 28L12 20L22 28L30 22L38 28" stroke="#FF6B2C" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <p class="upload-title">Select design images</p>
+        <p class="upload-sub">PNG files from your design folder</p>
+        <input type="file" id="designInput" accept="image/png,image/jpeg" multiple webkitdirectory hidden>
+      </div>
+
+      <div class="folder-option">
+        <label class="toggle-wrap">
+          <input type="checkbox" id="selectFolder" checked>
+          <span class="toggle-label">Select entire folder</span>
+        </label>
+        <button id="selectFiles" class="btn-secondary btn-sm">Or pick individual files</button>
+        <input type="file" id="designFilesInput" accept="image/png,image/jpeg" multiple hidden>
+      </div>
+
+      <div id="designInfo" class="info-card" style="display:none;">
+        <div class="info-header">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <rect width="16" height="16" rx="3" fill="#3B82F6"/>
+            <path d="M4 11L7 8L9 10L12 6" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span id="designCount">0 images loaded</span>
+        </div>
+        <div id="designPreview" class="design-preview"></div>
+        <div id="matchStatus" class="match-status"></div>
+      </div>
+
+      <div class="btn-row">
+        <button id="backToStep1" class="btn-secondary">Back</button>
+        <button id="toStep3" class="btn-primary" disabled>
+          Review & Upload
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M6 3L11 8L6 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+    </section>
+
+    <!-- Step 3: Upload -->
+    <section id="step3" class="panel" style="display:none;">
+      <div class="config-section">
+        <h3>Upload Settings</h3>
+        <div class="config-row">
+          <label>Concurrent tabs</label>
+          <div class="stepper">
+            <button id="tabsMinus" class="btn-stepper">−</button>
+            <span id="tabsCount">5</span>
+            <button id="tabsPlus" class="btn-stepper">+</button>
+          </div>
+        </div>
+        <div class="config-row">
+          <label>Delay between actions (ms)</label>
+          <input type="number" id="actionDelay" value="1500" min="500" max="10000" step="100" class="input-num">
+        </div>
+        <div class="config-row">
+          <label>Product type</label>
+          <select id="productType" class="input-select">
+            <option value="standard_tshirt">Standard T-Shirt</option>
+            <option value="premium_tshirt">Premium T-Shirt</option>
+            <option value="vneck">V-Neck</option>
+            <option value="tank_top">Tank Top</option>
+            <option value="long_sleeve">Long Sleeve</option>
+            <option value="sweatshirt">Sweatshirt</option>
+            <option value="hoodie">Pullover Hoodie</option>
+            <option value="popsocket">PopSocket</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="queueList" class="queue-list">
+        <!-- Populated dynamically -->
+      </div>
+
+      <div id="progressSection" class="progress-section" style="display:none;">
+        <div class="progress-bar-wrap">
+          <div class="progress-bar" id="progressBar" style="width:0%"></div>
+        </div>
+        <div class="progress-stats">
+          <span id="progressText">0 / 0</span>
+          <span id="progressPercent">0%</span>
+        </div>
+        <div id="logArea" class="log-area"></div>
+      </div>
+
+      <div class="btn-row">
+        <button id="backToStep2" class="btn-secondary">Back</button>
+        <button id="startUpload" class="btn-primary btn-go">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <path d="M4 2L16 9L4 16V2Z" fill="currentColor"/>
+          </svg>
+          Start Upload
+        </button>
+      </div>
+
+      <button id="stopUpload" class="btn-danger" style="display:none;">
+        Stop Upload
+      </button>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <p>Make sure you're logged into <a href="https://merch.amazon.com" target="_blank">merch.amazon.com</a></p>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

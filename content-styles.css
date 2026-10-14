@@ -1,0 +1,52 @@
+/* Merch Uploader — In-page Overlay Styles */
+
+#merch-uploader-overlay {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 999999;
+  background: rgba(15, 17, 23, 0.95);
+  border: 1px solid rgba(255, 153, 0, 0.3);
+  border-radius: 10px;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  animation: merch-slide-in 0.3s ease-out;
+}
+
+.merch-uploader-text {
+  color: #e4e7ef;
+  font-size: 13px;
+  font-weight: 500;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.merch-uploader-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 153, 0, 0.2);
+  border-top-color: #FF9900;
+  border-radius: 50%;
+  animation: merch-spin 0.8s linear infinite;
+}
+
+@keyframes merch-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes merch-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
